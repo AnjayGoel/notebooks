@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import timedelta
 from itertools import product
 from multiprocessing import *
@@ -20,13 +21,20 @@ def fetch(args):
     year = args[0]
     month = args[1]
     logging.info(f"Start {year}-{month}")
+
+    """
+    if "Date" in pd.read_csv(f"csv/{year}-{month}.csv").columns:
+        logging.info(f"Done {year}-{month}")
+        return
+    """
+
     try:
         df = pd.DataFrame()
         exp_dates = get_expiry_date(year=year, month=month)
         logging.info(f"Exp dates for {year}-{month}: {str(exp_dates)}")
         for exp_date in exp_dates:
             start_date = exp_date - timedelta(days=30 * 4)
-            for i in range(3000, 12500, 50):
+            for i in range(0, 12500, 50):
                 df_t = get_history(symbol="NIFTY",
                                    start=start_date,
                                    end=exp_date,
@@ -41,6 +49,8 @@ def fetch(args):
     except Exception as e:
         logging.error(f"Error: {year}-{month}")
         logging.error(e, exc_info=True)
+        time.sleep(1)
+        fetch(args)
 
 
 if __name__ == "__main__":
