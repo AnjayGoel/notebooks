@@ -34,8 +34,8 @@ def fetch(args):
         logging.info(f"Exp dates for {year}-{month}: {str(exp_dates)}")
         for exp_date in exp_dates:
             start_date = exp_date - timedelta(days=30 * 4)
-            for i in range(0, 12500, 50):
-                df_t = get_history(symbol="NIFTY",
+            for i in range(0, 34000, 100):
+                df_t = get_history(symbol="BANKNIFTY",
                                    start=start_date,
                                    end=exp_date,
                                    index=True,
@@ -44,7 +44,7 @@ def fetch(args):
                                    expiry_date=exp_date)
                 df_t["Date"] = df_t.index
                 df = pd.concat([df, df_t])
-        df.to_csv(f"csv/{year}-{month}.csv", index=False)
+        df.to_csv(f"csv/banknifty/{year}-{month}.csv", index=False)
         logging.info(f"Done {year}-{month}")
     except Exception as e:
         logging.error(f"Error: {year}-{month}")
