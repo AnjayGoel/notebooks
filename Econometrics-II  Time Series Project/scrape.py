@@ -114,6 +114,7 @@ def process_mibor():
 
 
 if __name__ == "__main__":
+    pass
     # df = fetch_mibor(1)
     # print(df)
-    process_mibor()
+    # process_mibor()

@@ -2,6 +2,7 @@
 import datetime
 import math
 import os
+import traceback
 from datetime import datetime, date, timedelta
 import calendar
 
@@ -12,6 +13,11 @@ from py_vollib.black_scholes.implied_volatility import *
 
 
 # %%
+def filter_outliers(arr, z_threshold=1):
+    if len(arr) == 1:
+        return arr
+    return np.array([x for x in arr if abs(x - np.mean(arr)) / np.std(arr) < z_threshold])
+
 
 def str_to_date(date_string):
     return datetime.strptime(date_string, "%Y-%m-%d").date()
@@ -76,14 +82,17 @@ def get_nifty(dt: date):
 
 
 def get_implied_volatility(row):
-    V = row["Close"]
-    F = row["Underlying"]
-    K = row["Strike Price"]
-    r = row["Interest_Rate_(Mibor)"] / 100
-    t = np.busday_count(row["Date"], row["Expiry"]) / 252
-    flag = "c"
-    print((V, F, K, t, r, flag))
-    return implied_volatility(V, F, K, t, r, flag)
+    try:
+        V = row["Close"]
+        F = row["Underlying"]
+        K = row["Strike Price"]
+        r = row["Interest_Rate_(Mibor)"] / 100
+        t = np.busday_count(row["Date"], row["Expiry"]) / 252
+        flag = "c"
+        return implied_volatility(V, F, K, t, r, flag)
+    except Exception as e:
+        # print((V, F, K, t, r, flag))
+        return -1
 
 
 # %%
@@ -113,6 +122,121 @@ def process_row(year, month):
     # print(final_date)
 
 
+def process_row_2(year, month):
+    df = pd.read_csv(f"csv/nifty/{year}-{month}.csv")
+    df["Expiry"] = df["Expiry"].apply(str_to_date)
+    df["Date"] = df["Date"].apply(str_to_date)
+    # print(tabulate(df.sample(10), headers=df.columns))
+    latest_expiry = get_last_expiry_date(df)
+    df = df[df["Expiry"] == latest_expiry]
+    # df = df[df["Close"] > abs(df["Underlying"] - df["Strike Price"])]
+    prev_month_date = get_prev_month_monday(latest_expiry)
+    last_month_date = sorted(df[(df["Date"] >= prev_month_date)]["Date"].unique())[0]
+    underlying_price = get_nifty(last_month_date)
+    df["Underlying"] = underlying_price
+    df["Interest_Rate_(Mibor)"] = get_mibor_mean(latest_expiry)
+    df["Implied_Volatility"] = df.apply(lambda row: get_implied_volatility(row), axis=1)
+
+    df_itm = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] <= underlying_price) &
+        (df["Strike Price"] >= 0.8 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+
+    df_otm = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] >= 1.03 * underlying_price) &
+        (df["Strike Price"] <= 1.2 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+    # df = df.sort_values(by=['Turnover'], ascending=False).head(5)
+    df["Realized_Volatility"] = get_nifty_std(last_month_date, latest_expiry)
+    return {
+        "Date": last_month_date,
+        "Expiry": latest_expiry,
+        "Underlying": underlying_price,
+        "Realized_Volatility": get_nifty_std(last_month_date, latest_expiry),
+        "Implied_Volatility_itm": df_itm["Implied_Volatility"].tolist(),
+        "Implied_Volatility_itm_mean": np.sqrt(np.mean(filter_outliers(df_itm["Implied_Volatility"].to_numpy()) ** 2)),
+        "Implied_Volatility_otm": df_otm["Implied_Volatility"].tolist(),
+        "Implied_Volatility_otm_mean": np.sqrt(np.mean(filter_outliers(df_otm["Implied_Volatility"].to_numpy()) ** 2)),
+        "Strike Prices_itm": df_itm["Strike Price"].tolist(),
+        "Strike Prices_otm": df_otm["Strike Price"].tolist()
+    }
+    # print(tabulate(df, headers=df.columns))
+    # print(underlying_price)
+    # print(final_date)
+
+
+def process_row_3(year, month):
+    df = pd.read_csv(f"csv/nifty/{year}-{month}.csv")
+    df["Expiry"] = df["Expiry"].apply(str_to_date)
+    df["Date"] = df["Date"].apply(str_to_date)
+    # print(tabulate(df.sample(10), headers=df.columns))
+    latest_expiry = get_last_expiry_date(df)
+    df = df[df["Expiry"] == latest_expiry]
+    # df = df[df["Close"] > abs(df["Underlying"] - df["Strike Price"])]
+    prev_month_date = get_prev_month_monday(latest_expiry)
+    last_month_date = sorted(df[(df["Date"] >= prev_month_date)]["Date"].unique())[0]
+    underlying_price = get_nifty(last_month_date)
+    df["Underlying"] = underlying_price
+    df["Interest_Rate_(Mibor)"] = get_mibor_mean(latest_expiry)
+    df["Implied_Volatility"] = df.apply(lambda row: get_implied_volatility(row), axis=1)
+
+    df_itm = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] < 0.9 * underlying_price) &
+        (df["Strike Price"] >= 0.5 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+
+    df_otm = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] > 1.1 * underlying_price) &
+        (df["Strike Price"] <= 1.5 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+
+    df_atm = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] >= 0.9 * underlying_price) &
+        (df["Strike Price"] <= 1.1 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+
+    df_liquid = df[
+        (df["Date"] == last_month_date) &
+        (df["Strike Price"] >= 0.5 * underlying_price) &
+        (df["Strike Price"] <= 1.5 * underlying_price) &
+        (df["Implied_Volatility"] > 0)
+        ].sort_values(by=['Turnover'], ascending=False).head(5)
+    # df = df.sort_values(by=['Turnover'], ascending=False).head(5)
+    df["Realized_Volatility"] = get_nifty_std(last_month_date, latest_expiry)
+    return {
+        "Date": last_month_date,
+        "Expiry": latest_expiry,
+        "Underlying": underlying_price,
+        "Realized_Volatility": get_nifty_std(last_month_date, latest_expiry),
+        "Implied_Volatility_itm": df_itm["Implied_Volatility"].tolist(),
+        "Implied_Volatility_itm_mean": np.sqrt(np.mean(filter_outliers(df_itm["Implied_Volatility"].to_numpy()) ** 2)),
+        "Implied_Volatility_otm": df_otm["Implied_Volatility"].tolist(),
+        "Implied_Volatility_otm_mean": np.sqrt(np.mean(filter_outliers(df_otm["Implied_Volatility"].to_numpy()) ** 2)),
+        "Implied_Volatility_atm": df_atm["Implied_Volatility"].tolist(),
+        "Implied_Volatility_atm_mean": np.sqrt(np.mean(filter_outliers(df_atm["Implied_Volatility"].to_numpy()) ** 2)),
+        "Implied_Volatility_liquid": df_liquid["Implied_Volatility"].tolist(),
+        "Implied_Volatility_liquid_mean": np.sqrt(
+            np.mean(filter_outliers(df_liquid["Implied_Volatility"].to_numpy()) ** 2)),
+        "Strike Prices_itm": df_itm["Strike Price"].tolist(),
+        "Strike Prices_otm": df_otm["Strike Price"].tolist(),
+        "Strike Prices_atm": df_atm["Strike Price"].tolist(),
+        "Strike Prices_liquid": df_liquid["Strike Price"].tolist()
+    }
+    # print(tabulate(df, headers=df.columns))
+    # print(underlying_price)
+    # print(final_date)
+
+
 # %%
 df = pd.read_csv("csv/nifty/2010-1.csv")
 df = df[df["Underlying"] == -1]
@@ -123,6 +247,18 @@ for year in range(2010, 2020):
 print(tabulate(df, headers=df.columns))
 df.to_csv("csv/final_dataset.csv", index=False)
 
+# %%
+# %%
+df = pd.DataFrame()
+for year in range(2010, 2020):
+    for month in range(1, 13):
+        # print(process(year, month))
+        df = df.append(process_row_3(year, month), ignore_index=True)
+        print("----------")
+print(tabulate(df, headers=df.columns))
+df.to_csv("csv/processed_33.csv", index=False)
+df = df.drop(columns=["Implied_Volatility_itm", "Implied_Volatility_otm", "Strike Prices_itm", "Strike Prices_otm"])
+df.to_csv("csv/processed_33_compact.csv", index=False)
 # %%
 # -----------------------------------------------------
 # Scratch
